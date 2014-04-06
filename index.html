@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cast-dash sender</title>
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+    <script type="text/javascript" src="//www.gstatic.com/cv/js/sender/v1/cast_sender.js"></script>
+    <style>
+        #messages {
+            font-weight: bold;
+        }
+
+        #messages span {
+            font-weight: normal;
+        }
+        .error {
+            color: #FF0000;
+        }
+    </style>
+</head>
+<body>
+    <h1>Status Messages:</h1>
+    <div id="messages">
+        <div>API Status: <span id="api_status">Not initialized</span></div>
+        <div>Receivers Available: <span id="receivers_available">N/A</span></div>
+        <div>Session Established: <span id="session_established">N/A</span></div>
+        <div>Last Message Received: <span id="last_message">N/A</span></div>
+    </div>
+    <hr/>
+    <h1>Interaction</h1>
+    <div>
+        <div id="init">Initialize API: App ID
+            <input id="appid" type="text"/>
+            <button onclick="initializeCastApi()">Perform Cast API Initialization</button>
+        </div>
+        <div id="connect">Connect To Receiver:
+            <button onclick="launchAppOnReceiver()">Perform Request Session</button>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+
+        $('#connect').hide();
+        $('#load').hide();
+
+        window.apiInitialized = false;
+        window.apiSession = null;
+
+        function setHudMessage(elementId, message) {
+            $('#'+elementId).html('' + JSON.stringify(message));
+        }
+
+        var sessionJoinedListener = function(session) {
+            setHudMessage('session_established', "Joined " + session.sessionId);
+        }
+        var sessionUpdateListener = function(session) {}
+        var receiverListener = function(availability) {
+             setHudMessage('receivers_available', ('available' === availability) ? "Yes" : "No");
+        }
+        var onInitSuccess = function() {
+            $('#api_status').removeClass('error');
+            setHudMessage('api_status', "Initialized");
+            $('#connect').show();
+            window.apiInitialized = true;
+        }
+        var onInitError = function(castError) {
+            setHudMessage('api_status', "Initialize Error: " + JSON.stringify(castError));
+            $('#api_status').addClass('error');
+        }
+
+        function sendmessages(messagenr, maxnr, timeout){
+            if(messagenr<maxnr){
+                messagenr += 1;
+                sendMessageToReceiver(messagenr);
+                var callback = (function(nr){
+                    return function(){
+                        sendmessages(nr, maxnr, timeout);
+                    };
+                })(messagenr);
+                setTimeout(callback, timeout);
+            }
+        }
+
+        function sendMessageToReceiver(message) {
+            window.apiSession.sendMessage("urn:x-cast:com.google.devrel.custom", message,
+                    function(){console.log('success');},
+                    function(castError){
+                        console.error("Error sending hud message: " + JSON.stringify(castError));
+                    });
+        }
+
+        function showhideHud() {
+            var showHide = (window.showingHud) ? 'hide' : 'show';
+            window.apiSession.sendMessage("urn:x-cast:com.google.devrel.custom", showHide,
+                    function(){
+                        window.showingHud = !window.showingHud;
+                    },
+                    function(castError){
+                        console.error("Error sending hud message: " + JSON.stringify(castError));
+                    });
+        }
+
+        function launchAppOnReceiver() {
+            if(window.apiInitialized) {
+                chrome.cast.requestSession(
+                        // Success
+                        function(session){
+                            window.apiSession = session;
+                            session.addUpdateListener(sessionUpdateListener);
+                            setHudMessage('session_established', "YES - " + session.sessionId);
+                            $('#load').show();
+
+                        },
+                        // Error
+                        function(castError){
+                            setHudMessage('session_established', "ERROR: " + JSON.stringify(castError));
+                            $('#api_status').addClass('error');
+                        });
+            } else {
+                setHudMessage('session_established', "NOT INITIALIZED");
+            }
+        }
+
+
+        function initializeCastApi() {
+            if (!chrome.cast || !chrome.cast.isAvailable) {
+                setHudMessage('app_status', "Cast APIs not Available. Retrying...");
+                setTimeout(initializeCastApi, 500);
+                return;
+            }
+            var appId = $('#appid').val();
+            if (appId.length < 6) {
+                setHudMessage('api_status', "Cast API ID Not filled in!");
+                $('#api_status').addClass('error');
+                return;
+            }
+            setHudMessage('app_status', "Initializing...");
+            var sessionRequest = new chrome.cast.SessionRequest(appId);
+            var apiConfig = new chrome.cast.ApiConfig(sessionRequest,
+                    sessionJoinedListener,
+                    receiverListener);
+            chrome.cast.initialize(apiConfig, onInitSuccess, onInitError);
+        };
+
+    </script>
+</body>
+</html>
